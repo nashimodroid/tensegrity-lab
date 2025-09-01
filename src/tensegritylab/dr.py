@@ -25,6 +25,7 @@ def dynamic_relaxation(
     g: float | None = None,
     verbose: bool = True,
     callback=None,
+    use_fdm: bool = False,
 ):
     """Dynamic relaxation solver.
 
@@ -46,7 +47,13 @@ def dynamic_relaxation(
         Called every iteration with current step and RMS.
     """
 
-    X = model.X.copy()
+    if use_fdm:
+        from .fdm import fdm_initialize
+
+        q_cable = [m["EA"] / m["L0"] for m in model.members if m["kind"] == "cable"]
+        X = fdm_initialize(model, q_cable, fixed=model.fixed)
+    else:
+        X = model.X.copy()
     V = np.zeros_like(X)
     M = np.full((model.N, 1), mass, dtype=float)
     Pext = np.zeros_like(X)
