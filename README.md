@@ -31,3 +31,5 @@ dynamic_relaxation(model, use_fdm=True)
 ```
 
 This typically reduces the number of iterations required for convergence.
+The Streamlit demo provides a *Use FDM initialization* checkbox to toggle
+this behaviour interactively.

@@ -14,6 +14,7 @@ EA_cable = st.slider("EA_cable", 0.1, 10.0, 1.0)
 EA_strut = st.slider("EA_strut", 1.0, 50.0, 10.0)
 cable_L0_scale = st.slider("cable_L0_scale", 0.5, 1.0, 0.95)
 strut_L0_scale = st.slider("strut_L0_scale", 1.0, 1.5, 1.2)
+use_fdm = st.checkbox("Use FDM initialization", value=False)
 
 if st.button("Solve"):
     model = build_snelson_prism(
@@ -30,7 +31,9 @@ if st.button("Solve"):
     def cb(step, rms):
         placeholder.write(f"step {step}: RMS={rms:.2e}")
 
-    X, forces, info = dynamic_relaxation(model, callback=cb, verbose=False)
+    X, forces, info = dynamic_relaxation(
+        model, callback=cb, verbose=False, use_fdm=use_fdm
+    )
     placeholder.write(
         f"Converged in {info['steps']} steps, RMS={info['rms']:.2e}"
     )

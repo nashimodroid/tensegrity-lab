@@ -18,7 +18,7 @@ class TensegrityModel:
 def dynamic_relaxation(
     model: TensegrityModel,
     mass: float = 1.0,
-    dt: float = 0.02,
+    dt: float = 0.03,
     damping: float = 0.02,
     max_steps: int = 20000,
     tol: float = 1e-6,
@@ -45,6 +45,9 @@ def dynamic_relaxation(
         Print convergence message when True.
     callback: callable(step, rms) | None
         Called every iteration with current step and RMS.
+    use_fdm: bool
+        When ``True`` the initial coordinates are obtained from the
+        Force Density Method instead of using ``model.X``.
     """
 
     if use_fdm:
@@ -89,6 +92,7 @@ def dynamic_relaxation(
         Fres = Fint + Pext
         Fres[fixed] = 0.0
         rms = np.sqrt((Fres[free] ** 2).sum() / max(1, free.sum()))
+        last_r = rms
         if callback is not None:
             callback(step, rms)
         if rms < tol:
@@ -98,7 +102,6 @@ def dynamic_relaxation(
         A = Fres / M
         V[free] = (1.0 - damping) * V[free] + dt * A[free]
         X[free] = X[free] + dt * V[free]
-        last_r = rms
 
     _, forces_raw = assemble_forces(X)
     forces = [{**m, "L": L, "force": f} for (L, f, m) in forces_raw]
