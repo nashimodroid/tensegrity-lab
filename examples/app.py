@@ -14,15 +14,15 @@ from tensegritylab.dr import (
 
 st.title("Tensegrity Dynamic Relaxation")
 
-radius = st.slider("radius", 0.5, 2.0, 1.0)
-height = st.slider("height", 0.5, 2.0, 1.2)
-twist_deg = st.slider("twist_deg", 0.0, 180.0, 150.0)
-EA_cable = st.slider("EA_cable", 0.1, 10.0, 1.0)
-EA_strut = st.slider("EA_strut", 1.0, 50.0, 10.0)
-cable_L0_scale = st.slider("cable_L0_scale", 0.5, 1.0, 0.95)
-strut_L0_scale = st.slider("strut_L0_scale", 1.0, 1.5, 1.2)
-EI = st.number_input("EI", value=1.0)
-K = st.number_input("K", value=1.0)
+radius = st.slider("radius", 0.5, 2.0, 1.0, step=0.1)
+height = st.slider("height", 0.5, 2.0, 1.2, step=0.1)
+twist_deg = st.slider("twist_deg", 0.0, 180.0, 150.0, step=1.0)
+EA_cable = st.slider("EA_cable", 0.1, 10.0, 1.0, step=0.1)
+EA_strut = st.slider("EA_strut", 1.0, 50.0, 10.0, step=1.0)
+cable_L0_scale = st.slider("cable_L0_scale", 0.5, 1.0, 0.95, step=0.01)
+strut_L0_scale = st.slider("strut_L0_scale", 1.0, 1.5, 1.2, step=0.01)
+EI = st.number_input("EI", min_value=0.0, max_value=100.0, value=1.0, step=0.1)
+K = st.number_input("K", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
 use_fdm = st.checkbox("Use FDM initialization", value=False)
 
 if st.button("Solve"):
@@ -35,17 +35,24 @@ if st.button("Solve"):
         cable_L0_scale=cable_L0_scale,
         strut_L0_scale=strut_L0_scale,
     )
-    placeholder = st.empty()
+    progress = st.empty()
 
     def cb(step, rms):
-        placeholder.write(f"step {step}: RMS={rms:.2e}")
+        progress.text(f"step {step}: RMS={rms:.2e}")
 
-    X, forces, info = dynamic_relaxation(
-        model, callback=cb, verbose=False, use_fdm=use_fdm
-    )
-    placeholder.write(
+    with st.spinner("Solving..."):
+        X, forces, info = dynamic_relaxation(
+            model, callback=cb, verbose=False, use_fdm=use_fdm
+        )
+
+    progress.text(
         f"Converged in {info['steps']} steps, RMS={info['rms']:.2e}"
     )
+    cols = st.columns(2)
+    cols[0].metric("Steps", info["steps"])
+    cols[1].metric("RMS", f"{info['rms']:.2e}")
+    if use_fdm:
+        st.caption("Initialized by FDM")
 
     fig = go.Figure()
     cable_x, cable_y, cable_z = [], [], []
