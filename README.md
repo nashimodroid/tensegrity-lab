@@ -10,6 +10,12 @@ After installing the package, launch the Streamlit application with:
 streamlit run examples/app.py
 ```
 
+## Custom strut editor
+
+The demo includes a strut editor with grid and snapping toggles, JSON
+import/export for endpoints, and a persistent 3D camera with a *Reset
+View* button.
+
 ## FDM 初期化
 
 The Force Density Method (FDM) provides an analytical starting shape by
