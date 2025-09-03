@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import List, Sequence, Set
+from itertools import combinations
+from typing import List, Sequence, Set, Tuple
 
 import numpy as np
 
-from .dr import dynamic_relaxation
+from .dr import dynamic_relaxation, degree_check
 
 
 @dataclass
@@ -58,11 +59,68 @@ def _layer_groups(nodes: Sequence[Node]) -> dict[int, list[int]]:
     return {0: low, 1: high}
 
 
-def _ring_cables(nodes: Sequence[Node], layer: Sequence[int], edges_set: set[tuple[int, int]], EA: float, L0_scale: float) -> list[Member]:
+def _convex_hull_order(pts: np.ndarray) -> List[int]:
+    """Return indices of ``pts`` forming the convex hull in CCW order."""
+
+    pts2 = pts[:, :2]
+    order = np.lexsort((pts2[:, 1], pts2[:, 0]))
+    pts2 = pts2[order]
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower: List[int] = []
+    for idx in order:
+        while len(lower) >= 2 and cross(pts2[lower[-2]], pts2[lower[-1]], pts2[idx]) <= 0:
+            lower.pop()
+        lower.append(idx)
+
+    upper: List[int] = []
+    for idx in reversed(order):
+        while len(upper) >= 2 and cross(pts2[upper[-2]], pts2[upper[-1]], pts2[idx]) <= 0:
+            upper.pop()
+        upper.append(idx)
+
+    hull = lower[:-1] + upper[:-1]
+    # map back to original ordering
+    return [int(h) for h in hull]
+
+
+def _nearest_cycle_order(pts: np.ndarray) -> List[int]:
+    """Greedy nearest-neighbour cycle ordering for points."""
+
+    n = len(pts)
+    if n == 0:
+        return []
+    unvisited = set(range(n))
+    order = [unvisited.pop()]
+    while unvisited:
+        last = order[-1]
+        dists = np.linalg.norm(pts[list(unvisited)] - pts[last], axis=1)
+        nxt = list(unvisited)[int(np.argmin(dists))]
+        unvisited.remove(nxt)
+        order.append(nxt)
+    return order
+
+
+def _ring_cables(
+    nodes: Sequence[Node],
+    layer: Sequence[int],
+    edges_set: set[tuple[int, int]],
+    EA: float,
+    L0_scale: float,
+    method: str,
+) -> list[Member]:
     pts = np.array([nodes[i].xyz for i in layer])
-    cx, cy = pts[:, 0].mean(), pts[:, 1].mean()
-    angles = [math.atan2(nodes[i].xyz[1]-cy, nodes[i].xyz[0]-cx) for i in layer]
-    order = [i for _, i in sorted(zip(angles, layer))]
+    if len(layer) < 2:
+        return []
+    if method == "convex_hull":
+        order_local = _convex_hull_order(pts)
+    elif method == "nearest_cycle":
+        order_local = _nearest_cycle_order(pts[:, :2])
+    else:
+        raise ValueError(f"unknown ring method: {method}")
+    order = [layer[i] for i in order_local]
     members: list[Member] = []
     for a, b in zip(order, order[1:] + order[:1]):
         key = tuple(sorted((a, b)))
@@ -72,6 +130,33 @@ def _ring_cables(nodes: Sequence[Node], layer: Sequence[int], edges_set: set[tup
         members.append(Member(a, b, "cable", EA, L0_scale * L))
         edges_set.add(key)
     return members
+
+
+def _delaunay_edges(pts: np.ndarray) -> List[Tuple[int, int]]:
+    """Return edge list from Delaunay triangulation of ``pts``.
+
+    Uses :mod:`scipy` if available, otherwise falls back to connecting each
+    point to its two nearest neighbours.
+    """
+
+    try:  # pragma: no cover - optional dependency
+        from scipy.spatial import Delaunay  # type: ignore
+
+        tri = Delaunay(pts)
+        edges: set[Tuple[int, int]] = set()
+        for simplex in tri.simplices:
+            for i, j in combinations(simplex, 2):
+                edges.add(tuple(sorted((int(i), int(j)))))
+        return list(edges)
+    except Exception:  # pragma: no cover - fallback
+        edges: set[Tuple[int, int]] = set()
+        n = len(pts)
+        for i in range(n):
+            dists = np.linalg.norm(pts - pts[i], axis=1)
+            idx = np.argsort(dists)[1:3]
+            for j in idx:
+                edges.add(tuple(sorted((i, int(j)))))
+        return list(edges)
 
 
 def _strut_info(nodes: Sequence[Node], strut_pairs: Sequence[tuple[int, int]]):
@@ -104,7 +189,7 @@ def plan_cables_from_struts(
     L0_scale_cable: float = 0.95,
     L0_scale_strut: float = 1.08,
     n_fix: int = 3,
-) -> Model:
+) -> tuple[Model, dict]:
     nodes, strut_pairs = _unique_nodes(struts)
 
     members: list[Member] = []
@@ -122,35 +207,84 @@ def plan_cables_from_struts(
     layers = _layer_groups(nodes)
     edges_set = set(strut_edges)
     for layer in layers.values():
-        members.extend(_ring_cables(nodes, layer, edges_set, EA_cable, L0_scale_cable))
+        members.extend(
+            _ring_cables(nodes, layer, edges_set, EA_cable, L0_scale_cable, ring)
+        )
 
     info = _strut_info(nodes, strut_pairs)
     m = len(info)
     for k in range(m):
         s = info[k]
-        sn = info[(k + 1) % m]
-        # cross cables
-        a, b = s["top"], sn["bottom"]
-        key = tuple(sorted((a, b)))
-        if key not in edges_set and key not in strut_edges:
-            L = np.linalg.norm(nodes[a].xyz - nodes[b].xyz)
-            members.append(Member(a, b, "cable", EA_cable, L0_scale_cable * L))
-            edges_set.add(key)
+
+        if cross == "nearest_cw":
+            targets = [info[(k + 1) % m]["bottom"]]
+        elif cross == "all-to-next":
+            targets = [info[(k + i) % m]["bottom"] for i in range(1, m)]
+        else:
+            raise ValueError(f"unknown cross method: {cross}")
+        for tb in targets:
+            a, b = s["top"], tb
+            key = tuple(sorted((a, b)))
+            if key not in edges_set and key not in strut_edges:
+                L = np.linalg.norm(nodes[a].xyz - nodes[b].xyz)
+                members.append(Member(a, b, "cable", EA_cable, L0_scale_cable * L))
+                edges_set.add(key)
+
         # side cables
+        if side not in {"vertical", "vertical+neighbor"}:
+            raise ValueError(f"unknown side method: {side}")
         a, b = s["bottom"], s["top"]
         key = tuple(sorted((a, b)))
         if key not in edges_set and key not in strut_edges:
             L = np.linalg.norm(nodes[a].xyz - nodes[b].xyz)
             members.append(Member(a, b, "cable", EA_cable, L0_scale_cable * L))
             edges_set.add(key)
-        a, b = s["bottom"], info[(k - 1) % m]["top"]
-        key = tuple(sorted((a, b)))
-        if key not in edges_set and key not in strut_edges:
-            L = np.linalg.norm(nodes[a].xyz - nodes[b].xyz)
-            members.append(Member(a, b, "cable", EA_cable, L0_scale_cable * L))
-            edges_set.add(key)
+        if side == "vertical+neighbor":
+            a, b = s["bottom"], info[(k - 1) % m]["top"]
+            key = tuple(sorted((a, b)))
+            if key not in edges_set and key not in strut_edges:
+                L = np.linalg.norm(nodes[a].xyz - nodes[b].xyz)
+                members.append(Member(a, b, "cable", EA_cable, L0_scale_cable * L))
+                edges_set.add(key)
 
-    return Model(nodes, members, fixed)
+    model = Model(nodes, members, fixed)
+
+    ok_deg, _ = degree_check(model)
+    stable = False
+    try:
+        _, _, info = dynamic_relaxation(model, tol=1e-4, max_steps=5000, verbose=False)
+        stable = info.get("rms", 1.0) < 1e-4
+    except Exception:
+        stable = False
+
+    added_aux = 0
+    if not (ok_deg and stable):
+        for layer in layers.values():
+            pts = np.array([nodes[i].xyz[:2] for i in layer])
+            for a_idx, b_idx in _delaunay_edges(pts):
+                a, b = layer[a_idx], layer[b_idx]
+                key = tuple(sorted((a, b)))
+                if key in edges_set or key in strut_edges:
+                    continue
+                L = np.linalg.norm(nodes[a].xyz - nodes[b].xyz)
+                members.append(Member(a, b, "cable", EA_cable, L0_scale_cable * L))
+                edges_set.add(key)
+                added_aux += 1
+        if fix == "auto" and n_fix < 4:
+            n_fix = min(4, n_fix + 1)
+            low_nodes = sorted(nodes, key=lambda n: n.xyz[2])[: n_fix]
+            fixed = {n.id for n in low_nodes}
+        model = Model(nodes, members, fixed)
+        ok_deg, _ = degree_check(model)
+        try:
+            _, _, info = dynamic_relaxation(model, tol=1e-4, max_steps=5000, verbose=False)
+            stable = info.get("rms", 1.0) < 1e-4
+        except Exception:
+            stable = False
+
+    diagnostics = {"degenerate": not (ok_deg and stable), "added_aux": added_aux, "n_fix": len(fixed)}
+
+    return model, diagnostics
 
 
 def tune_prestress(model: Model, targets: dict) -> None:
