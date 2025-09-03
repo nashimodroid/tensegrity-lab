@@ -131,6 +131,44 @@ def to_member_dataframe(model, Xf, forces):
     return pd.DataFrame(rows, columns=["kind", "i", "j", "L", "force"])
 
 
+def buckling_safety_for_struts(model, Xf, forces, EI, K=1.0):
+    """Compute Euler buckling safety factors for struts.
+
+    Parameters
+    ----------
+    model : TensegrityModel
+        Structure definition (unused but kept for API symmetry).
+    Xf : array_like
+        Final node coordinates.
+    forces : sequence of dict
+        Member forces as returned by :func:`dynamic_relaxation`.
+    EI : float
+        Flexural rigidity of the struts.
+    K : float, optional
+        Effective length factor.
+
+    Returns
+    -------
+    list of dict
+        Each dict contains ``i``, ``j``, ``L``, ``force``, ``Pcr``, and ``safety``.
+        Members with zero or tensile force are skipped.
+    """
+
+    out = []
+    for m in forces:
+        if m["kind"] != "strut":
+            continue
+        force = m["force"]
+        if force >= 0.0 or abs(force) < 1e-12:
+            continue
+        i, j = m["i"], m["j"]
+        L = float(np.linalg.norm(Xf[j] - Xf[i]))
+        Pcr = (np.pi**2 * EI) / ((K * L) ** 2)
+        safety = Pcr / abs(force)
+        out.append({"i": i, "j": j, "L": L, "force": force, "Pcr": Pcr, "safety": safety})
+    return out
+
+
 def to_structure_json(model, Xf):
     """Serialize a model and coordinates to a plain Python ``dict``."""
 
@@ -198,6 +236,7 @@ def build_snelson_prism(
 __all__ = [
     "build_snelson_prism",
     "dynamic_relaxation",
+    "buckling_safety_for_struts",
     "to_member_dataframe",
     "to_structure_json",
 ]
