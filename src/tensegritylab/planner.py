@@ -7,7 +7,7 @@ from typing import List, Sequence, Set, Tuple
 
 import numpy as np
 
-from .dr import dynamic_relaxation, degree_check
+from .dr import dynamic_relaxation, degree_check, buckling_safety_for_struts
 
 
 @dataclass
@@ -287,37 +287,97 @@ def plan_cables_from_struts(
     return model, diagnostics
 
 
-def tune_prestress(model: Model, targets: dict) -> None:
-    """Adjust member rest lengths to meet force targets."""
+def tune_prestress(
+    model: Model,
+    targets: dict,
+    bounds: tuple[tuple[float, float], tuple[float, float]] = ((0.5, 1.5), (0.5, 1.5)),
+):
+    """Adjust cable/strut rest lengths to meet prestress targets.
 
-    from scipy.optimize import minimize
+    Parameters
+    ----------
+    model : Model
+        Structure to be modified in-place.
+    targets : dict
+        Dictionary specifying desired force ranges. ``{"cable_t": (tmin, tmax),
+        "strut_safety": smin}`` are recognised keys.
+    bounds : sequence of tuple, optional
+        Bounds for the cable and strut rest-length scaling factors passed to the
+        optimizer.
+
+    Returns
+    -------
+    scipy.optimize.OptimizeResult
+        Result from :func:`scipy.optimize.minimize`.
+    """
+
+    try:  # pragma: no cover - optional dependency
+        from scipy.optimize import minimize  # type: ignore
+    except Exception:  # pragma: no cover - fallback grid search
+        from types import SimpleNamespace
+
+        def minimize(fun, x0, bounds, method=None):
+            xs = np.linspace(bounds[0][0], bounds[0][1], 11)
+            ys = np.linspace(bounds[1][0], bounds[1][1], 11)
+            best = None
+            best_x = x0
+            for a in xs:
+                for b in ys:
+                    val = fun([a, b])
+                    if best is None or val < best:
+                        best = val
+                        best_x = [a, b]
+            return SimpleNamespace(x=np.array(best_x), fun=best)
 
     base = [m.L0 for m in model.members]
-    t_min, t_max = targets.get("cable", (0.0, np.inf))
+    t_min, t_max = targets.get("cable_t", (0.0, np.inf))
+    safety_req = float(targets.get("strut_safety", 0.0))
 
-    def objective(x):
+    def apply_scales(x):
         sc, ss = x
         for m, L0 in zip(model.members, base):
             if m.kind == "cable":
                 m.L0 = L0 * sc
             else:
                 m.L0 = L0 * ss
-        _, forces, _ = dynamic_relaxation(model, verbose=False, tol=1e-4, max_steps=5000)
+        X, forces, _ = dynamic_relaxation(
+            model, verbose=False, tol=1e-4, max_steps=5000
+        )
+        return X, forces
+
+    def objective(x):
+        X, forces = apply_scales(x)
+        cable_forces = [f["force"] for f in forces if f["kind"] == "cable"]
+        spread = max(cable_forces) - min(cable_forces) if cable_forces else 0.0
         pen = 0.0
-        for f, m in zip(forces, model.members):
+        for f in forces:
             force = f["force"]
-            if m.kind == "cable":
+            if f["kind"] == "cable":
                 if force < t_min:
-                    pen += (t_min - force) ** 2
+                    pen += 10.0 * (t_min - force) ** 2
                 if force > t_max:
-                    pen += (force - t_max) ** 2
+                    pen += 10.0 * (force - t_max) ** 2
             else:
                 if force > 0:
                     pen += force**2
-        return pen
+        if safety_req > 0.0:
+            buck = buckling_safety_for_struts(model, X, forces, EI=1.0, K=1.0)
+            if buck:
+                min_sf = min(b["safety"] for b in buck)
+            else:
+                min_sf = np.inf
+            if min_sf < safety_req:
+                pen += (safety_req - min_sf) ** 2 * 100.0
+        return spread + pen
 
-    res = minimize(objective, x0=[1.0, 1.0], bounds=[(0.5, 1.5), (0.5, 1.5)])
-    objective(res.x)
+    res = minimize(
+        objective,
+        x0=[1.0, 1.0],
+        bounds=bounds,
+        method="SLSQP",
+    )
+    # Apply final scales to model
+    apply_scales(res.x)
     return res
 
 
