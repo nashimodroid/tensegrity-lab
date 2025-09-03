@@ -33,3 +33,15 @@ dynamic_relaxation(model, use_fdm=True)
 This typically reduces the number of iterations required for convergence.
 The Streamlit demo provides a *Use FDM initialization* checkbox to toggle
 this behaviour interactively.
+
+## 出力
+
+Member forces can be exported to CSV via `to_member_dataframe`, while
+`to_structure_json` serializes the geometry and member data to JSON.
+The Streamlit demo offers download buttons for both formats.
+
+## 座屈チェック
+
+`buckling_safety_for_struts` evaluates Euler buckling safety factors for
+compressive members. Values below a chosen threshold (e.g. 1.5) highlight
+struts that may require redesign.
