@@ -48,23 +48,61 @@ if st.button("Solve"):
     )
 
     fig = go.Figure()
+    cable_x, cable_y, cable_z = [], [], []
+    strut_x, strut_y, strut_z = [], [], []
     for m in model.members:
         i, j = m["i"], m["j"]
-        xs = [X[i, 0], X[j, 0]]
-        ys = [X[i, 1], X[j, 1]]
-        zs = [X[i, 2], X[j, 2]]
-        dash = "solid" if m["kind"] == "cable" else "dash"
-        color = "blue" if m["kind"] == "cable" else "red"
-        fig.add_trace(
-            go.Scatter3d(
-                x=xs,
-                y=ys,
-                z=zs,
-                mode="lines",
-                line=dict(color=color, dash=dash),
-            )
+        xs = [X[i, 0], X[j, 0], None]
+        ys = [X[i, 1], X[j, 1], None]
+        zs = [X[i, 2], X[j, 2], None]
+        if m["kind"] == "cable":
+            cable_x.extend(xs)
+            cable_y.extend(ys)
+            cable_z.extend(zs)
+        else:
+            strut_x.extend(xs)
+            strut_y.extend(ys)
+            strut_z.extend(zs)
+
+    fig.add_trace(
+        go.Scatter3d(
+            x=cable_x,
+            y=cable_y,
+            z=cable_z,
+            mode="lines",
+            line=dict(color="blue"),
+            name="Cable",
         )
-    fig.update_layout(scene=dict(aspectmode="data"), showlegend=False)
+    )
+    fig.add_trace(
+        go.Scatter3d(
+            x=strut_x,
+            y=strut_y,
+            z=strut_z,
+            mode="lines",
+            line=dict(color="red"),
+            name="Strut",
+        )
+    )
+    fig.add_trace(
+        go.Scatter3d(
+            x=X[:, 0],
+            y=X[:, 1],
+            z=X[:, 2],
+            mode="markers",
+            marker=dict(color="lightgray"),
+            name="Nodes",
+        )
+    )
+    fig.update_layout(
+        scene=dict(
+            xaxis_title="X",
+            yaxis_title="Y",
+            zaxis_title="Z",
+            aspectmode="data",
+        ),
+        showlegend=True,
+    )
     st.plotly_chart(fig, use_container_width=True)
 
     df = to_member_dataframe(model, X, forces)
