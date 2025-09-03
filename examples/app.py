@@ -14,7 +14,13 @@ from tensegritylab.dr import (
 )
 from tensegritylab.opt import sweep_prestress
 from tensegritylab.planner import plan_cables_from_struts, tune_prestress
-from tensegritylab.editor_state import add_strut, edit_strut, delete_strut
+from tensegritylab.editor_state import (
+    add_strut,
+    edit_strut,
+    delete_strut,
+    struts_from_json,
+    struts_to_json,
+)
 
 st.title("Tensegrity Dynamic Relaxation")
 
@@ -24,12 +30,34 @@ if mode == "Custom editor":
     st.header("Strut Editor")
     struts = st.session_state.setdefault("struts", [])
     selected = st.session_state.setdefault("selected_strut", 0)
+    st.session_state.setdefault("view_rev", 0)
 
-    col1, _, col3 = st.columns(3)
+    snap_z = st.checkbox("Snap Z", value=False)
+    show_grid = st.checkbox("XY Grid", value=False)
+    col_imp, col_exp = st.columns(2)
+    with col_imp:
+        uploaded = st.file_uploader("Import Struts", type="json")
+        if uploaded is not None:
+            st.session_state["struts"] = struts_from_json(
+                uploaded.getvalue().decode("utf-8")
+            )
+            st.session_state["selected_strut"] = 0
+            struts = st.session_state["struts"]
+    with col_exp:
+        st.download_button(
+            "Export Struts",
+            data=struts_to_json(st.session_state["struts"]),
+            file_name="struts.json",
+            mime="application/json",
+        )
+
+    col1, col_reset, col3 = st.columns(3)
     if col1.button("Add"):
         struts = add_strut(struts, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
         st.session_state["struts"] = struts
         st.session_state["selected_strut"] = len(struts) - 1
+    if col_reset.button("Reset View"):
+        st.session_state["view_rev"] += 1
 
     if struts:
         idx = st.selectbox(
@@ -43,6 +71,10 @@ if mode == "Custom editor":
         bx = st.slider("Bx", -2.0, 2.0, float(b[0]), step=0.05)
         by = st.slider("By", -2.0, 2.0, float(b[1]), step=0.05)
         bz = st.slider("Bz", -2.0, 2.0, float(b[2]), step=0.05)
+        if snap_z:
+            snap = 0.1
+            az = round(az / snap) * snap
+            bz = round(bz / snap) * snap
         struts = edit_strut(struts, idx, (ax, ay, az), (bx, by, bz))
         st.session_state["struts"] = struts
 
@@ -56,10 +88,16 @@ if mode == "Custom editor":
         columns=["x0", "y0", "z0", "x1", "y1", "z1"],
     )
     edited_df = st.data_editor(df, num_rows="dynamic")
-    st.session_state["struts"] = [
-        ((row.x0, row.y0, row.z0), (row.x1, row.y1, row.z1))
-        for row in edited_df.itertuples(index=False)
-    ]
+    new_struts = []
+    for row in edited_df.itertuples(index=False):
+        a = (row.x0, row.y0, row.z0)
+        b = (row.x1, row.y1, row.z1)
+        if snap_z:
+            snap = 0.1
+            a = (a[0], a[1], round(a[2] / snap) * snap)
+            b = (b[0], b[1], round(b[2] / snap) * snap)
+        new_struts.append((a, b))
+    st.session_state["struts"] = new_struts
 
     fig = go.Figure()
     sx, sy, sz = [], [], []
@@ -71,6 +109,29 @@ if mode == "Custom editor":
         nx.extend([a[0], b[0]])
         ny.extend([a[1], b[1]])
         nz.extend([a[2], b[2]])
+    if show_grid:
+        grid = np.arange(-2.0, 2.1, 0.5)
+        for g in grid:
+            fig.add_trace(
+                go.Scatter3d(
+                    x=[-2, 2, None],
+                    y=[g, g, None],
+                    z=[0, 0, None],
+                    mode="lines",
+                    line=dict(color="lightgray", width=1),
+                    showlegend=False,
+                )
+            )
+            fig.add_trace(
+                go.Scatter3d(
+                    x=[g, g, None],
+                    y=[-2, 2, None],
+                    z=[0, 0, None],
+                    mode="lines",
+                    line=dict(color="lightgray", width=1),
+                    showlegend=False,
+                )
+            )
     if st.session_state["struts"]:
         fig.add_trace(
             go.Scatter3d(
@@ -92,7 +153,7 @@ if mode == "Custom editor":
                 name="Nodes",
             )
         )
-    fig.update_layout(scene=dict(aspectmode="data"))
+    fig.update_layout(scene=dict(aspectmode="data"), uirevision=st.session_state["view_rev"])
     st.plotly_chart(fig, use_container_width=True)
 
     ring_opt = st.selectbox(
