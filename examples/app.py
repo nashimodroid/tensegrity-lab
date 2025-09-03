@@ -95,12 +95,30 @@ if mode == "Custom editor":
     fig.update_layout(scene=dict(aspectmode="data"))
     st.plotly_chart(fig, use_container_width=True)
 
+    ring_opt = st.selectbox(
+        "ring", ["convex_hull", "nearest_cycle"], index=0, key="ring_option"
+    )
+    cross_opt = st.selectbox(
+        "cross", ["nearest_cw", "all-to-next"], index=0, key="cross_option"
+    )
+    side_opt = st.selectbox(
+        "side", ["vertical", "vertical+neighbor"], index=0, key="side_option"
+    )
+
     if st.button("Auto-plan Cables"):
-        model = plan_cables_from_struts(st.session_state["struts"])
+        model, diag = plan_cables_from_struts(
+            st.session_state["struts"],
+            ring=ring_opt,
+            cross=cross_opt,
+            side=side_opt,
+        )
         st.session_state["planned_model"] = model
+        st.session_state["diagnostics"] = diag
 
     if "planned_model" in st.session_state:
         model = st.session_state["planned_model"]
+        diag = st.session_state.get("diagnostics", {})
+        st.write("Diagnostics", diag)
         X = np.array([n.xyz for n in model.nodes])
         cable_x, cable_y, cable_z = [], [], []
         strut_x, strut_y, strut_z = [], [], []

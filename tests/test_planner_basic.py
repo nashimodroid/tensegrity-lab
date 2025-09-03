@@ -18,11 +18,14 @@ def test_planner_basic():
         (B2, T0),
     ]
 
-    model = plan_cables_from_struts(struts)
+    model, diag = plan_cables_from_struts(struts)
 
     cables = [m for m in model.members if m.kind == "cable"]
     assert len(cables) > 0
     assert len(model.fixed) >= 3
+
+    assert diag["added_aux"] >= 0
+    assert diag["n_fix"] >= 3
 
     ok, _ = degree_check(model)
     assert ok
