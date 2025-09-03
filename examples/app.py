@@ -13,7 +13,7 @@ from tensegritylab.dr import (
     TensegrityModel,
 )
 from tensegritylab.opt import sweep_prestress
-from tensegritylab.planner import plan_cables_from_struts
+from tensegritylab.planner import plan_cables_from_struts, tune_prestress
 from tensegritylab.editor_state import add_strut, edit_strut, delete_strut
 
 st.title("Tensegrity Dynamic Relaxation")
@@ -170,12 +170,30 @@ if mode == "Custom editor":
         st.plotly_chart(fig2, use_container_width=True)
 
         use_fdm = st.checkbox("Use FDM initialization", value=False, key="use_fdm_custom")
+        auto_tune = st.checkbox("Auto-tune prestress", value=False, key="auto_tune_custom")
+        if auto_tune:
+            tmin = st.number_input(
+                "Min cable tension", 0.0, 100.0, 0.5, key="tmin_custom"
+            )
+            tmax = st.number_input(
+                "Max cable tension", 0.0, 100.0, 3.0, key="tmax_custom"
+            )
+            safety = st.number_input(
+                "Strut safety", 0.0, 100.0, 1.5, key="safety_custom"
+            )
         if st.button("Solve"):
             progress = st.empty()
 
             def cb(step, rms):
                 progress.text(f"step {step}: RMS={rms:.2e}")
 
+            forces_before = None
+            if auto_tune:
+                _, forces_before, _ = dynamic_relaxation(model, verbose=False)
+                tune_prestress(
+                    model,
+                    {"cable_t": (tmin, tmax), "strut_safety": safety},
+                )
             with st.spinner("Solving..."):
                 X, forces, info = dynamic_relaxation(
                     model, callback=cb, verbose=False, use_fdm=use_fdm
@@ -184,6 +202,15 @@ if mode == "Custom editor":
             progress.text(
                 f"Converged in {info['steps']} steps, RMS={info['rms']:.2e}"
             )
+            if auto_tune and forces_before is not None:
+                before = [f["force"] for f in forces_before if f["kind"] == "cable"]
+                after = [f["force"] for f in forces if f["kind"] == "cable"]
+                hist = go.Figure()
+                hist.add_trace(go.Histogram(x=before, name="Before"))
+                hist.add_trace(go.Histogram(x=after, name="After"))
+                hist.update_layout(barmode="overlay")
+                hist.update_traces(opacity=0.5)
+                st.plotly_chart(hist, use_container_width=True)
             fig3 = go.Figure()
             cable_x, cable_y, cable_z = [], [], []
             strut_x, strut_y, strut_z = [], [], []
@@ -252,6 +279,11 @@ strut_L0_scale = st.slider("strut_L0_scale", 1.0, 1.5, 1.2, step=0.01)
 EI = st.number_input("EI", min_value=0.0, max_value=100.0, value=1.0, step=0.1)
 K = st.number_input("K", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
 use_fdm = st.checkbox("Use FDM initialization", value=False)
+auto_tune = st.checkbox("Auto-tune prestress", value=False)
+if auto_tune:
+    tmin = st.number_input("Min cable tension", 0.0, 100.0, 0.5)
+    tmax = st.number_input("Max cable tension", 0.0, 100.0, 3.0)
+    safety = st.number_input("Strut safety", 0.0, 100.0, 1.5)
 
 loaded_model = None
 if uploaded is not None:
@@ -289,6 +321,11 @@ if st.button("Solve"):
     def cb(step, rms):
         progress.text(f"step {step}: RMS={rms:.2e}")
 
+    forces_before = None
+    if auto_tune:
+        _, forces_before, _ = dynamic_relaxation(model, verbose=False)
+        tune_prestress(model, {"cable_t": (tmin, tmax), "strut_safety": safety})
+
     with st.spinner("Solving..."):
         X, forces, info = dynamic_relaxation(
             model, callback=cb, verbose=False, use_fdm=use_fdm
@@ -297,6 +334,15 @@ if st.button("Solve"):
     progress.text(
         f"Converged in {info['steps']} steps, RMS={info['rms']:.2e}"
     )
+    if auto_tune and forces_before is not None:
+        before = [f["force"] for f in forces_before if f["kind"] == "cable"]
+        after = [f["force"] for f in forces if f["kind"] == "cable"]
+        hist = go.Figure()
+        hist.add_trace(go.Histogram(x=before, name="Before"))
+        hist.add_trace(go.Histogram(x=after, name="After"))
+        hist.update_layout(barmode="overlay")
+        hist.update_traces(opacity=0.5)
+        st.plotly_chart(hist, use_container_width=True)
     cols = st.columns(2)
     cols[0].metric("Steps", info["steps"])
     cols[1].metric("RMS", f"{info['rms']:.2e}")
