@@ -12,6 +12,7 @@ from tensegritylab.dr import (
     to_structure_json,
     TensegrityModel,
 )
+from tensegritylab.opt import sweep_prestress
 
 st.title("Tensegrity Dynamic Relaxation")
 
@@ -161,3 +162,59 @@ if st.button("Solve"):
     st.download_button(
         "Save JSON", js_str, "structure.json", "application/json"
     )
+
+
+st.header("Optimization")
+
+col1, col2, col3 = st.columns(3)
+with col1:
+    c_min = st.number_input("cable_L0_scale min", 0.5, 1.0, 0.9, step=0.01)
+with col2:
+    c_max = st.number_input("cable_L0_scale max", 0.5, 1.0, 1.0, step=0.01)
+with col3:
+    c_step = st.number_input("cable_L0_scale step", 0.01, 0.5, 0.02, step=0.01)
+
+col4, col5, col6 = st.columns(3)
+with col4:
+    s_min = st.number_input("strut_L0_scale min", 1.0, 2.0, 1.0, step=0.01)
+with col5:
+    s_max = st.number_input("strut_L0_scale max", 1.0, 2.0, 1.2, step=0.01)
+with col6:
+    s_step = st.number_input("strut_L0_scale step", 0.01, 1.0, 0.05, step=0.01)
+
+metric = st.selectbox("metric", ["min_tension_spread", "max_buckling_safety"])
+
+if st.button("Run sweep"):
+    if preset == "Prism3":
+        base = build_snelson_prism(
+            r=radius,
+            h=height,
+            theta=np.deg2rad(twist_deg),
+            EA_cable=EA_cable,
+            EA_strut=EA_strut,
+            cable_L0_scale=1.0,
+            strut_L0_scale=1.0,
+        )
+    elif preset == "Prism4":
+        base = build_quadruple_prism(
+            r=radius,
+            h=height,
+            theta=np.deg2rad(twist_deg),
+            EA_cable=EA_cable,
+            EA_strut=EA_strut,
+            cable_L0_scale=1.0,
+            strut_L0_scale=1.0,
+        )
+    else:
+        if loaded_model is None:
+            st.error("Upload a JSON for Custom preset")
+            st.stop()
+        base = loaded_model
+
+    cable_scales = np.arange(c_min, c_max + 1e-12, c_step)
+    strut_scales = np.arange(s_min, s_max + 1e-12, s_step)
+    best, history = sweep_prestress(base, cable_scales, strut_scales, metric=metric)
+    st.write("Best parameters", best)
+    st.dataframe(history)
+    hist_csv = history.to_csv(index=False).encode("utf-8")
+    st.download_button("Download sweep CSV", hist_csv, "sweep.csv", "text/csv")
