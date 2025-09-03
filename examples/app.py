@@ -1,9 +1,15 @@
+import json
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from tensegritylab.dr import build_snelson_prism, dynamic_relaxation
+from tensegritylab.dr import (
+    build_snelson_prism,
+    dynamic_relaxation,
+    to_member_dataframe,
+    to_structure_json,
+)
 
 st.title("Tensegrity Dynamic Relaxation")
 
@@ -58,7 +64,13 @@ if st.button("Solve"):
     fig.update_layout(scene=dict(aspectmode="data"), showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
 
-    df = pd.DataFrame(forces)[["kind", "L", "force"]]
+    df = to_member_dataframe(model, X, forces)
     st.dataframe(df)
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", csv, "forces.csv", "text/csv")
+
+    js = to_structure_json(model, X)
+    js_str = json.dumps(js)
+    st.download_button(
+        "Download JSON", js_str, "structure.json", "application/json"
+    )

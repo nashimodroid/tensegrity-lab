@@ -108,6 +108,42 @@ def dynamic_relaxation(
     return X, forces, {"rms": last_r, "steps": step}
 
 
+def to_member_dataframe(model, Xf, forces):
+    """Export member forces to a :class:`pandas.DataFrame`.
+
+    Parameters
+    ----------
+    model : TensegrityModel
+        The structure definition.
+    Xf : array_like
+        Final node coordinates after relaxation.
+    forces : sequence of dict
+        Output from :func:`dynamic_relaxation` describing member forces.
+    """
+
+    import pandas as pd
+
+    rows = []
+    for m, f in zip(model.members, forces):
+        i, j = m["i"], m["j"]
+        L = float(np.linalg.norm(Xf[j] - Xf[i]))
+        rows.append({"kind": m["kind"], "i": i, "j": j, "L": L, "force": f["force"]})
+    return pd.DataFrame(rows, columns=["kind", "i", "j", "L", "force"])
+
+
+def to_structure_json(model, Xf):
+    """Serialize a model and coordinates to a plain Python ``dict``."""
+
+    return {
+        "nodes": Xf.tolist(),
+        "members": [
+            {"i": m["i"], "j": m["j"], "kind": m["kind"], "EA": m["EA"], "L0": m["L0"]}
+            for m in model.members
+        ],
+        "fixed": model.fixed.tolist(),
+    }
+
+
 def build_snelson_prism(
     r: float = 1.0,
     h: float = 1.2,
@@ -159,4 +195,9 @@ def build_snelson_prism(
     return TensegrityModel(X0, members, fixed)
 
 
-__all__ = ["build_snelson_prism", "dynamic_relaxation"]
+__all__ = [
+    "build_snelson_prism",
+    "dynamic_relaxation",
+    "to_member_dataframe",
+    "to_structure_json",
+]
