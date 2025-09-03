@@ -1,5 +1,10 @@
 import numpy as np
 
+from .presets import build_snelson_prism
+
+
+import numpy as np
+
 
 class TensegrityModel:
     """Simple container for tensegrity structures."""
@@ -13,6 +18,9 @@ class TensegrityModel:
             if fixed is None
             else np.asarray(fixed, dtype=bool).copy()
         )
+
+
+from .presets import build_snelson_prism
 
 
 def dynamic_relaxation(
@@ -180,59 +188,6 @@ def to_structure_json(model, Xf):
         ],
         "fixed": model.fixed.tolist(),
     }
-
-
-def build_snelson_prism(
-    r: float = 1.0,
-    h: float = 1.2,
-    theta: float = np.deg2rad(150),
-    EA_cable: float = 1.0,
-    EA_strut: float = 10.0,
-    cable_L0_scale: float = 0.95,
-    strut_L0_scale: float = 1.20,
-):
-    """Create a 3-strut Snelson prism model.
-
-    Parameters are mostly geometric and material properties.
-    """
-
-    B = np.array(
-        [[r * np.cos(2 * np.pi * k / 3), r * np.sin(2 * np.pi * k / 3), 0.0] for k in range(3)]
-    )
-    T = np.array(
-        [
-            [
-                r * np.cos(2 * np.pi * k / 3 + theta),
-                r * np.sin(2 * np.pi * k / 3 + theta),
-                h,
-            ]
-            for k in range(3)
-        ]
-    )
-    X0 = np.vstack([B, T])
-
-    members = []
-
-    def add(i, j, kind, EA, L0_scale):
-        L = np.linalg.norm(X0[j] - X0[i])
-        members.append({"i": i, "j": j, "kind": kind, "EA": EA, "L0": L0_scale * L})
-
-    for k in range(3):
-        add(k, 3 + ((k + 1) % 3), "strut", EA_strut, strut_L0_scale)
-
-    for (i, j) in [(0, 1), (1, 2), (2, 0)]:
-        add(i, j, "cable", EA_cable, cable_L0_scale)
-        add(3 + i, 3 + j, "cable", EA_cable, cable_L0_scale)
-
-    for k in range(3):
-        add(k, 3 + k, "cable", EA_cable, cable_L0_scale)
-        add(k, 3 + ((k - 1) % 3), "cable", EA_cable, cable_L0_scale)
-
-    fixed = np.zeros(6, dtype=bool)
-    fixed[:3] = True
-    return TensegrityModel(X0, members, fixed)
-
-
 __all__ = [
     "build_snelson_prism",
     "dynamic_relaxation",

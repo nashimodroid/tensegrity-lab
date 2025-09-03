@@ -4,15 +4,20 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from tensegritylab.presets import build_snelson_prism, build_quadruple_prism
 from tensegritylab.dr import (
-    build_snelson_prism,
     dynamic_relaxation,
     buckling_safety_for_struts,
     to_member_dataframe,
     to_structure_json,
+    TensegrityModel,
 )
 
 st.title("Tensegrity Dynamic Relaxation")
+
+uploaded = st.file_uploader("Load JSON", type="json")
+default_idx = 2 if uploaded else 0
+preset = st.selectbox("Preset", ["Prism3", "Prism4", "Custom"], index=default_idx)
 
 radius = st.slider("radius", 0.5, 2.0, 1.0, step=0.1)
 height = st.slider("height", 0.5, 2.0, 1.2, step=0.1)
@@ -25,16 +30,37 @@ EI = st.number_input("EI", min_value=0.0, max_value=100.0, value=1.0, step=0.1)
 K = st.number_input("K", min_value=0.1, max_value=10.0, value=1.0, step=0.1)
 use_fdm = st.checkbox("Use FDM initialization", value=False)
 
+loaded_model = None
+if uploaded is not None:
+    data = json.load(uploaded)
+    loaded_model = TensegrityModel(data["nodes"], data["members"], data.get("fixed"))
+
 if st.button("Solve"):
-    model = build_snelson_prism(
-        r=radius,
-        h=height,
-        theta=np.deg2rad(twist_deg),
-        EA_cable=EA_cable,
-        EA_strut=EA_strut,
-        cable_L0_scale=cable_L0_scale,
-        strut_L0_scale=strut_L0_scale,
-    )
+    if preset == "Prism3":
+        model = build_snelson_prism(
+            r=radius,
+            h=height,
+            theta=np.deg2rad(twist_deg),
+            EA_cable=EA_cable,
+            EA_strut=EA_strut,
+            cable_L0_scale=cable_L0_scale,
+            strut_L0_scale=strut_L0_scale,
+        )
+    elif preset == "Prism4":
+        model = build_quadruple_prism(
+            r=radius,
+            h=height,
+            theta=np.deg2rad(twist_deg),
+            EA_cable=EA_cable,
+            EA_strut=EA_strut,
+            cable_L0_scale=cable_L0_scale,
+            strut_L0_scale=strut_L0_scale,
+        )
+    else:
+        if loaded_model is None:
+            st.error("Upload a JSON for Custom preset")
+            st.stop()
+        model = loaded_model
     progress = st.empty()
 
     def cb(step, rms):
@@ -133,5 +159,5 @@ if st.button("Solve"):
     js = to_structure_json(model, X)
     js_str = json.dumps(js)
     st.download_button(
-        "Download JSON", js_str, "structure.json", "application/json"
+        "Save JSON", js_str, "structure.json", "application/json"
     )
