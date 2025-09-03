@@ -7,6 +7,7 @@ import streamlit as st
 from tensegritylab.dr import (
     build_snelson_prism,
     dynamic_relaxation,
+    buckling_safety_for_struts,
     to_member_dataframe,
     to_structure_json,
 )
@@ -20,6 +21,8 @@ EA_cable = st.slider("EA_cable", 0.1, 10.0, 1.0)
 EA_strut = st.slider("EA_strut", 1.0, 50.0, 10.0)
 cable_L0_scale = st.slider("cable_L0_scale", 0.5, 1.0, 0.95)
 strut_L0_scale = st.slider("strut_L0_scale", 1.0, 1.5, 1.2)
+EI = st.number_input("EI", value=1.0)
+K = st.number_input("K", value=1.0)
 use_fdm = st.checkbox("Use FDM initialization", value=False)
 
 if st.button("Solve"):
@@ -68,6 +71,19 @@ if st.button("Solve"):
     st.dataframe(df)
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", csv, "forces.csv", "text/csv")
+
+    buckling = buckling_safety_for_struts(model, X, forces, EI, K)
+    buckling_df = pd.DataFrame(buckling)
+    if not buckling_df.empty:
+        styler = buckling_df.style.applymap(
+            lambda v: "background-color: #faa" if v < 1.5 else "",
+            subset=["safety"],
+        )
+        st.dataframe(styler)
+        buckling_csv = buckling_df.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "Download Buckling CSV", buckling_csv, "buckling.csv", "text/csv"
+        )
 
     js = to_structure_json(model, X)
     js_str = json.dumps(js)
