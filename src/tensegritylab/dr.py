@@ -3,9 +3,6 @@ import numpy as np
 from .presets import build_snelson_prism
 
 
-import numpy as np
-
-
 class TensegrityModel:
     """Simple container for tensegrity structures."""
 
@@ -20,11 +17,37 @@ class TensegrityModel:
         )
 
 
+def _as_model(model):
+    """Coerce various lightweight model containers to ``TensegrityModel``."""
+
+    if isinstance(model, TensegrityModel):
+        return model
+
+    if hasattr(model, "nodes") and hasattr(model, "members"):
+        X = np.asarray([n.xyz for n in model.nodes], dtype=float)
+        fixed = np.zeros(len(model.nodes), dtype=bool)
+        for i in getattr(model, "fixed", []):
+            fixed[int(i)] = True
+        members = [
+            {
+                "i": int(m.i),
+                "j": int(m.j),
+                "kind": m.kind,
+                "EA": float(m.EA),
+                "L0": float(m.L0),
+            }
+            for m in model.members
+        ]
+        return TensegrityModel(X, members, fixed)
+
+    raise TypeError("Unsupported model type")
+
+
 from .presets import build_snelson_prism
 
 
 def dynamic_relaxation(
-    model: TensegrityModel,
+    model,
     mass: float = 1.0,
     dt: float = 0.03,
     damping: float = 0.02,
@@ -57,6 +80,8 @@ def dynamic_relaxation(
         When ``True`` the initial coordinates are obtained from the
         Force Density Method instead of using ``model.X``.
     """
+
+    model = _as_model(model)
 
     if use_fdm:
         from .fdm import fdm_initialize
@@ -188,10 +213,31 @@ def to_structure_json(model, Xf):
         ],
         "fixed": model.fixed.tolist(),
     }
+
+
+def degree_check(model):
+    """Check node connectivity degrees.
+
+    Returns a tuple ``(ok, warnings)`` where ``ok`` is ``True`` when every
+    node has degree >=1 and a warning list is otherwise provided.
+    """
+
+    m = _as_model(model)
+    deg = np.zeros(m.N, dtype=int)
+    for mem in m.members:
+        deg[mem["i"]] += 1
+        deg[mem["j"]] += 1
+    warnings = []
+    if np.any(deg < 1):
+        warnings.append("isolated nodes detected")
+    if np.any(deg < 3):
+        warnings.append("nodes with degree < 3 present")
+    return len(warnings) == 0, warnings
 __all__ = [
     "build_snelson_prism",
     "dynamic_relaxation",
     "buckling_safety_for_struts",
     "to_member_dataframe",
     "to_structure_json",
+    "degree_check",
 ]
